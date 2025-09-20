@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "PushUp",
+  "description": "Track coding streaks, push solutions to GitHub, and get contest reminders.",
+  "version": "1.0.0",
+  "permissions": [
+    "storage",
+    "notifications",
+    "alarms",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://*.leetcode.com/*",
+    "*://*.codeforces.com/*",
+    "*://*.codechef.com/*",
+    "*://*.github.com/*",
+    "*://*.api.github.com/*"
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": {
+      "16": "logo.png",
+      "48": "logo.png",
+      "128": "logo.png"
+    }
+  },
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.leetcode.com/*",
+        "*://*.codeforces.com/*",
+        "*://*.codechef.com/*"
+      ],
+      "js": ["assets/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
+  }
+}
