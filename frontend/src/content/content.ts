@@ -78,6 +78,8 @@ interface PushUpDebug {
 
 class SubmissionDetector {
   private platform: string;
+  private lastProcessedSubmission: string | null = null;
+  private processingSubmission = false;
 
   constructor() {
     this.platform = this.detectPlatform();
@@ -95,9 +97,23 @@ class SubmissionDetector {
   private initializeDetection() {
     // Watch for successful submission indicators
     const observer = new MutationObserver(() => {
-      if (this.isSuccessfulSubmission()) {
+      if (this.isSuccessfulSubmission() && !this.processingSubmission) {
         const data = this.extractSubmissionData();
-        this.sendToBackground(data);
+        const submissionKey = `${data.platform}-${data.problemId}-${Date.now()}`;
+        
+        // Check if this submission was already processed recently (within 5 seconds)
+        if (this.lastProcessedSubmission && 
+            Date.now() - parseInt(this.lastProcessedSubmission.split('-').pop() || '0') < 5000) {
+          console.log('[PushUp] Skipping duplicate submission detection');
+          return;
+        }
+        
+        this.processingSubmission = true;
+        this.lastProcessedSubmission = submissionKey;
+        
+        this.sendToBackground(data).finally(() => {
+          this.processingSubmission = false;
+        });
       }
     });
 
@@ -302,35 +318,93 @@ class SubmissionDetector {
 
   private extractLeetCodeCode(): string {
     try {
-      // Try multiple ways to get the code
+      console.log('[PushUp DEBUG] Attempting to extract LeetCode code...');
       let code = '';
       
-      // Method 1: Monaco editor
-      const editor = document.querySelector('.monaco-editor');
-      if (editor) {
-        const codeElement = editor.querySelector('.view-lines');
-        if (codeElement?.textContent) {
-          code = codeElement.textContent.trim();
+      // Method 1: Try to get from Monaco editor via getValue API if available
+      try {
+        const monacoEditor = (window as unknown as { monaco?: { editor?: { getModels?: () => { getValue?: () => string }[] } } }).monaco?.editor?.getModels?.()?.[0];
+        if (monacoEditor && monacoEditor.getValue) {
+          code = monacoEditor.getValue();
+          console.log('[PushUp DEBUG] Extracted code from Monaco API');
         }
+      } catch (e) {
+        console.log('[PushUp DEBUG] Monaco API not available:', e);
       }
       
-      // Method 2: CodeMirror editor (fallback)
+      // Method 2: Try textarea elements (these preserve formatting)
       if (!code) {
-        const codeMirror = document.querySelector('.CodeMirror-code');
-        if (codeMirror?.textContent) {
-          code = codeMirror.textContent.trim();
+        const textareas = document.querySelectorAll('textarea');
+        for (const textarea of textareas) {
+          if (textarea.value && textarea.value.trim() && 
+              (textarea.value.length > 10 || textarea.value.includes('function') || textarea.value.includes('class'))) {
+            code = textarea.value;
+            console.log('[PushUp DEBUG] Extracted code from textarea');
+            break;
+          }
         }
       }
       
-      // Method 3: Textarea (fallback)
+      // Method 3: Monaco editor with better line extraction
+      if (!code) {
+        const editor = document.querySelector('.monaco-editor');
+        if (editor) {
+          // Try to get individual lines to preserve formatting
+          const lines = editor.querySelectorAll('.view-line');
+          if (lines.length > 0) {
+            code = Array.from(lines).map(line => {
+              // Get text content but preserve spaces
+              const lineText = line.textContent || '';
+              return lineText;
+            }).join('\n');
+            console.log('[PushUp DEBUG] Extracted code from Monaco view-lines');
+          } else {
+            // Fallback to textContent
+            const codeElement = editor.querySelector('.view-lines');
+            if (codeElement?.textContent) {
+              code = codeElement.textContent;
+              console.log('[PushUp DEBUG] Extracted code from Monaco textContent');
+            }
+          }
+        }
+      }
+      
+      // Method 4: CodeMirror editor (fallback)
+      if (!code) {
+        const codeMirror = document.querySelector('.CodeMirror');
+        if (codeMirror) {
+          // Try to get CodeMirror instance
+          const cmInstance = (codeMirror as unknown as { CodeMirror?: { getValue?: () => string } }).CodeMirror;
+          if (cmInstance && cmInstance.getValue) {
+            code = cmInstance.getValue();
+            console.log('[PushUp DEBUG] Extracted code from CodeMirror API');
+          } else {
+            // Fallback to DOM extraction
+            const lines = codeMirror.querySelectorAll('.CodeMirror-line');
+            if (lines.length > 0) {
+              code = Array.from(lines).map(line => line.textContent || '').join('\n');
+              console.log('[PushUp DEBUG] Extracted code from CodeMirror lines');
+            }
+          }
+        }
+      }
+      
+      // Method 5: Generic textarea fallback
       if (!code) {
         const textarea = document.querySelector('textarea[data-mode]') as HTMLTextAreaElement;
         if (textarea?.value) {
-          code = textarea.value.trim();
+          code = textarea.value;
+          console.log('[PushUp DEBUG] Extracted code from data-mode textarea');
         }
       }
       
-      if (!code) throw new Error('No code content found');
+      if (!code) {
+        console.log('[PushUp DEBUG] No code found with any method');
+        throw new Error('No code content found');
+      }
+      
+      console.log('[PushUp DEBUG] Final extracted code length:', code.length);
+      console.log('[PushUp DEBUG] Code preview:', code.substring(0, 100) + '...');
       
       return code;
     } catch (error) {

@@ -185,6 +185,29 @@ export default function App() {
       window.history.replaceState({}, document.title, "/");
     }
 
+    // --- Load Fresh Data from Background ---
+    const loadFreshData = async () => {
+      if (isChromeStorageAvailable && chrome.runtime?.sendMessage) {
+        try {
+          const response = await chrome.runtime.sendMessage({
+            type: 'GET_SUBMISSION_STATS'
+          });
+          
+          if (response?.success && response?.data) {
+            const data = response.data;
+            setDailySubmissions(data.dailySubmissions || []);
+            setEasy(data.easy || 0);
+            setMedium(data.medium || 0);
+            setHard(data.hard || 0);
+            setTotalSolved(data.totalSolved || 0);
+            console.log('[PushUp] Fresh data loaded:', data);
+          }
+        } catch (error) {
+          console.log('[PushUp] Could not load fresh data, falling back to storage:', error);
+        }
+      }
+    };
+
     // --- Load Stored Data ---
     const loadData = () => {
       if (isChromeStorageAvailable) {
@@ -203,7 +226,9 @@ export default function App() {
       }
     };
 
+    // Load data first from storage, then try to get fresh data
     loadData();
+    loadFreshData();
 
     // Listen to changes
     if (isChromeStorageAvailable && chrome.storage?.onChanged) {
