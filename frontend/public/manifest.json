@@ -8,7 +8,8 @@
     "notifications",
     "alarms",
     "activeTab",
-    "scripting"
+    "scripting",
+    "identity"
   ],
   "host_permissions": [
     "*://*.leetcode.com/*",

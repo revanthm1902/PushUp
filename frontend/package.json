@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && cp public/manifest.json dist/",
+    "build": "vite build && copy public\\manifest.json dist\\",
     "lint": "eslint .",
     "preview": "vite preview",
     "postbuild": "copyfiles -u 1 icons/* dist/icons",

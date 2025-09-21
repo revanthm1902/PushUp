@@ -31,75 +31,163 @@ export class GitHubService {
     this.repo = repo;
   }
 
-  async setupRepo(repoName: string, isNew: boolean) {
+  async createRepositoryWithStructure(repoName: string, description?: string) {
     try {
       if (!this.octokit) {
         throw new GitHubError('GitHub client is not initialized', 'INIT_ERROR');
       }
 
-      if (isNew) {
-        await this.createNewRepo(repoName);
-      } else {
-        const hasAccess = await this.verifyRepoAccess();
-        if (!hasAccess) {
-          throw new GitHubError('Insufficient permissions for repository', 'PERMISSION_ERROR');
+      let repoData;
+      
+      try {
+        // Try to create the repository
+        const { data } = await this.octokit.repos.createForAuthenticatedUser({
+          name: repoName,
+          auto_init: true,
+          private: false, // Making it public for better visibility
+          description: description || 'My coding solutions repository managed by PushUp - Practice makes perfect! 🚀',
+        });
+        repoData = data;
+        console.log('[PushUp] Repository created successfully:', repoName);
+      } catch (error) {
+        if (error instanceof Error && 'status' in error && error.status === 422) {
+          // Repository already exists, try to get it
+          console.log('[PushUp] Repository already exists, trying to access it:', repoName);
+          try {
+            const { data } = await this.octokit.repos.get({
+              owner: this.owner,
+              repo: repoName,
+            });
+            repoData = data;
+            console.log('[PushUp] Successfully accessed existing repository:', repoName);
+          } catch {
+            throw new GitHubError('Repository already exists and cannot be accessed. Please choose a different name or check permissions.', 'REPO_ACCESS_ERROR');
+          }
+        } else {
+          throw this.handleGitHubError(error);
         }
       }
+      
+      if (!repoData || !repoData.owner) {
+        throw new GitHubError('Failed to access repository', 'REPO_ACCESS_ERROR');
+      }
+      
+      this.owner = repoData.owner.login;
+      this.repo = repoData.name;
+      
+      // Initialize the folder structure (this will work even for existing repos)
       await this.initializeFolders();
-    } catch (error) {
-      throw this.handleGitHubError(error);
-    }
-  }
-
-  private async createNewRepo(name: string) {
-    try {
-      const { data } = await this.octokit.repos.createForAuthenticatedUser({
-        name,
-        auto_init: true,
-        private: true,
-        description: 'My coding solutions repository managed by PushUp',
-      });
       
-      if (!data || !data.owner) {
-        throw new GitHubError('Failed to create repository', 'REPO_CREATE_ERROR');
-      }
-      
-      this.owner = data.owner.login;
-      this.repo = data.name;
-      
-      // Verify we can access the newly created repo
-      await this.verifyRepoAccess();
-    } catch (error) {
-      if (error instanceof Error && 'status' in error && error.status === 422) {
-        throw new GitHubError('Repository already exists', 'REPO_EXISTS');
-      }
-      throw this.handleGitHubError(error);
-    }
-  }
-
-  async verifyRepoAccess(): Promise<boolean> {
-    try {
-      const { data } = await this.octokit.repos.get({
+      return {
+        success: true,
+        repoUrl: repoData.html_url,
         owner: this.owner,
-        repo: this.repo,
-      });
-      return data.permissions?.push || false;
+        repo: this.repo
+      };
     } catch (error) {
+      if (error instanceof GitHubError) {
+        throw error;
+      }
       throw this.handleGitHubError(error);
     }
   }
 
   private async initializeFolders() {
-    const folders = ['leetcode', 'codeforces', 'codechef'];
-    for (const folder of folders) {
-      if (!(await this.checkFileExists(`${folder}/.gitkeep`))) {
-        await this.createFile(
-          `${folder}/.gitkeep`,
-          '',
-          `Initialize ${folder} folder`
-        );
+    const folders = [
+      { name: 'leetcode', description: 'LeetCode Solutions' },
+      { name: 'codeforces', description: 'Codeforces Solutions' },
+      { name: 'codechef', description: 'CodeChef Solutions' }
+    ];
+    
+    try {
+      // Create README.md for the repository (only if it doesn't exist)
+      const readmeExists = await this.checkFileExists('README.md');
+      if (!readmeExists) {
+        const readmeContent = this.generateRepositoryReadme();
+        await this.createFile('README.md', readmeContent, 'Initial commit: Setup repository structure');
+        console.log('[PushUp] Created main README.md');
+      } else {
+        console.log('[PushUp] README.md already exists, skipping');
       }
+      
+      // Create folders with their own README files
+      for (const folder of folders) {
+        const folderReadmePath = `${folder.name}/README.md`;
+        const folderExists = await this.checkFileExists(folderReadmePath);
+        
+        if (!folderExists) {
+          const folderReadme = this.generateFolderReadme(folder.name, folder.description);
+          await this.createFile(folderReadmePath, folderReadme, `Initialize ${folder.name} folder`);
+          console.log(`[PushUp] Created ${folder.name} folder with README`);
+        } else {
+          console.log(`[PushUp] ${folder.name} folder already exists, skipping`);
+        }
+      }
+      
+      console.log('[PushUp] Repository structure initialization completed');
+    } catch (error) {
+      console.error('[PushUp] Error initializing folders:', error);
+      throw this.handleGitHubError(error);
     }
+  }
+
+  private generateRepositoryReadme(): string {
+    return `# 🚀 My Coding Journey
+
+This repository contains my coding solutions from various competitive programming platforms, automatically managed by **PushUp** extension.
+
+## 📁 Repository Structure
+
+\`\`\`
+├── leetcode/          # LeetCode solutions
+├── codeforces/        # Codeforces solutions
+└── codechef/          # CodeChef solutions
+\`\`\`
+
+## 🎯 Platforms
+
+- **LeetCode**: Data Structures & Algorithms practice
+- **Codeforces**: Competitive programming contests
+- **CodeChef**: Monthly challenges and contests
+
+## 📊 Progress Tracking
+
+This repository is automatically updated by the PushUp browser extension, which:
+- ✅ Automatically detects successful submissions
+- 📝 Saves solutions with proper file organization
+- 🔥 Tracks coding streaks and progress
+- 🏆 Manages achievements and milestones
+
+---
+*Generated by [PushUp Extension](https://github.com/revanthm1902/PushUp) 🎯*
+`;
+  }
+
+  private generateFolderReadme(platform: string, description: string): string {
+    const platformUpper = platform.charAt(0).toUpperCase() + platform.slice(1);
+    
+    return `# ${platformUpper} Solutions
+
+${description} organized and tracked by PushUp extension.
+
+## 📝 File Naming Convention
+
+Files are automatically named based on the problem:
+- Problem titles are converted to kebab-case
+- File extensions match the programming language used
+- Example: \`two-sum.py\`, \`binary-search.cpp\`
+
+## 🏆 Stats
+
+Solutions in this folder are automatically tracked for:
+- Daily solving streaks
+- Difficulty distribution  
+- Language usage patterns
+- Time-based progress
+
+---
+*Auto-generated by PushUp Extension*
+`;
   }
 
   async saveSolution(platform: string, problemId: string, code: string, language: string) {
@@ -180,7 +268,7 @@ export class GitHubService {
         repo: this.repo,
         path,
         message,
-        content: Buffer.from(content).toString('base64'),
+        content: btoa(unescape(encodeURIComponent(content))),
       });
     } catch (error) {
       throw this.handleGitHubError(error);
@@ -204,7 +292,7 @@ export class GitHubService {
         repo: this.repo,
         path,
         message,
-        content: Buffer.from(content).toString('base64'),
+        content: btoa(unescape(encodeURIComponent(content))),
         sha: existing.sha,
       });
     } catch (error) {
@@ -258,23 +346,19 @@ export class GitHubService {
   }
 }
 
-// Utility function to check repository activity
-export async function checkRepoActivity(username: string, repo: string) {
+// Utility function to get user information
+export async function getUserInfo(token: string) {
   try {
-    const url = `https://api.github.com/repos/${username}/${repo}/commits?per_page=1`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch commits: ${res.statusText}`);
-    }
-    const commits = await res.json();
-    if (commits && commits.length > 0) {
-      const lastCommitDate = new Date(commits[0].commit.author.date);
-      const today = new Date();
-      return lastCommitDate.toDateString() === today.toDateString();
-    }
-    return false;
+    const octokit = new Octokit({ auth: token });
+    const { data } = await octokit.users.getAuthenticated();
+    return {
+      login: data.login,
+      name: data.name,
+      avatar_url: data.avatar_url,
+      public_repos: data.public_repos
+    };
   } catch (error) {
-    console.error('Failed to check repo activity:', error);
-    return false;
+    console.error('Failed to get user info:', error);
+    throw new GitHubError('Failed to fetch user information', 'USER_INFO_ERROR');
   }
 }

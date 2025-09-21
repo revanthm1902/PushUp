@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { GitHubService } from '../utils/github';
+import { GitHubService, getUserInfo } from '../utils/github';
+import { StorageHelper } from '../utils/storage-helper';
+import { GitHubOAuth } from '../utils/oauth';
 
 // ---- Polyfill for chrome.storage in dev ----
 if (typeof chrome === "undefined" || !chrome.storage) {
@@ -117,11 +119,36 @@ export default function SettingsPage() {
   }, [notifications, repoCheck, githubUser, githubRepo, loading]);
 
   // ---- Handlers ----
-  const handleLogin = () => {
-    if (chrome.tabs?.create) {
-      chrome.tabs.create({ url: "http://localhost:3000/auth/github/login" });
-    } else {
-      window.location.href = "http://localhost:3000/auth/github/login"; // dev fallback
+  const handleLogin = async () => {
+    try {
+      setLoading(true);
+      
+      // Use Personal Access Token method for better Chrome extension compatibility
+      const token = await GitHubOAuth.authenticateWithPersonalToken();
+      
+      if (token) {
+        // Validate token by getting user info
+        const userInfo = await getUserInfo(token);
+        
+        if (userInfo) {
+          // Save token and user info
+          await StorageHelper.set({
+            github_token: token,
+            githubUser: userInfo.login
+          });
+          
+          setToken(token);
+          setGithubUser(userInfo.login);
+          console.log('GitHub authentication successful:', userInfo.login);
+        } else {
+          throw new Error('Invalid token - could not fetch user info');
+        }
+      }
+    } catch (error) {
+      console.error('Login failed:', error);
+      alert('Login failed. Please check your token and try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -133,7 +160,6 @@ export default function SettingsPage() {
   };
 
   const [repoName, setRepoName] = useState('');
-  const [isNewRepo, setIsNewRepo] = useState(true);
 
   const handleSetup = async () => {
     try {
@@ -148,13 +174,25 @@ export default function SettingsPage() {
         repo: repoName
       });
 
-      await github.setupRepo(repoName, isNewRepo);
+      const setupResult = await github.createRepositoryWithStructure(repoName);
       
-      // Update the repo name in storage after successful setup
-      await chrome.storage.local.set({ githubRepo: repoName });
-      setGithubRepo(repoName);
-      
-      alert('Repository setup successful!');
+      if (setupResult.success) {
+        // Save complete GitHub configuration after successful setup
+        const githubConfig = {
+          githubRepo: repoName,
+          githubOwner: result.githubUser as string,
+          githubToken: result.github_token as string,
+          repoUrl: setupResult.repoUrl,
+          setupDate: new Date().toISOString()
+        };
+        
+        await StorageHelper.set(githubConfig);
+        setGithubRepo(repoName);
+        
+        alert(`Repository "${repoName}" created successfully! Check it out at: ${setupResult.repoUrl}`);
+      } else {
+        throw new Error('Failed to create repository');
+      }
     } catch (error) {
       console.error('Setup failed:', error);
       alert(error instanceof Error ? error.message : 'Repository setup failed. Please check the console for details.');
@@ -248,24 +286,9 @@ export default function SettingsPage() {
         
         <div className="space-y-4">
           <div>
-            <label className="block mb-2">
-              <input
-                type="radio"
-                checked={isNewRepo}
-                onChange={() => setIsNewRepo(true)}
-                className="mr-2"
-              />
-              Create new repository
-            </label>
-            <label className="block">
-              <input
-                type="radio"
-                checked={!isNewRepo}
-                onChange={() => setIsNewRepo(false)}
-                className="mr-2"
-              />
-              Use existing repository
-            </label>
+            <p className="text-sm text-gray-400 mb-3">
+              Create a repository to store your coding solutions. The extension will automatically create folders for LeetCode, Codeforces, and CodeChef.
+            </p>
           </div>
 
           <input

@@ -7,42 +7,48 @@ import { HashRouter as Router, Routes, Route, Link } from "react-router-dom";
 import Achievements from "../achievements/achievements";
 import SettingsPage from "../settings/settings";
 import Notifications from "../notifications/notifications";
+import SubmissionCalendar from "../components/SubmissionCalendar";
 
 // Types
 type DailyData = { date: string; solved: number; difficulty: "E" | "M" | "H" };
+type DailySubmissionData = {
+  date: string;
+  submissions: number;
+  problems: {
+    easy: number;
+    medium: number;
+    hard: number;
+  };
+};
 type StorageResult = {
   streak?: number;
   lastUpdated?: string;
   dailyData?: DailyData[];
+  dailySubmissions?: DailySubmissionData[];
   easy?: number;
   medium?: number;
   hard?: number;
+  totalSolved?: number;
 };
 
 // ---------------- Home Page ----------------
 function Home({
   streak,
   dailyData,
+  dailySubmissions,
   easy,
   medium,
   hard,
+  totalSolved,
 }: {
   streak: number;
   dailyData: DailyData[];
+  dailySubmissions: DailySubmissionData[];
   easy: number;
   medium: number;
   hard: number;
+  totalSolved: number;
 }) {
-  // build past 50 days
-  const today = new Date();
-  const past50Days = Array.from({ length: 50 }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - (49 - i));
-    const iso = d.toISOString().split("T")[0];
-    const found = dailyData.find((x) => x.date === iso);
-    return { date: iso, solved: found?.solved || 0 };
-  });
-
   // percentages
   const total = easy + medium + hard || 1;
   const easyPct = Math.round((easy / total) * 100);
@@ -66,27 +72,14 @@ function Home({
         <h1 className="text-4xl font-extrabold text-white drop-shadow-md">
           {streak} 🔥
         </h1>
+        <p className="text-sm text-orange-100 mt-1">
+          Total Solved: {totalSolved}
+        </p>
       </div>
 
-      {/* Calendar Grid */}
-      <div className="grid grid-cols-10 gap-1 mb-4">
-        {past50Days.map((day, i) => (
-          <div
-            key={i}
-            title={day.date}
-            className={`w-5 h-5 rounded-md flex items-center justify-center text-xs font-medium
-              ${day.solved === 0
-                ? "bg-gray-700 text-gray-400"
-                : day.solved < 2
-                ? "bg-green-600 text-white"
-                : day.solved < 4
-                ? "bg-yellow-500 text-black"
-                : "bg-red-500 text-white"
-              }`}
-          >
-            {day.solved > 0 ? day.solved : ""}
-          </div>
-        ))}
+      {/* Submission Calendar */}
+      <div className="mb-4">
+        <SubmissionCalendar dailySubmissions={dailySubmissions} />
       </div>
 
       {/* Donut Chart */}
@@ -171,9 +164,11 @@ function Home({
 export default function App() {
   const [streak, setStreak] = useState(0);
   const [dailyData, setDailyData] = useState<DailyData[]>([]);
+  const [dailySubmissions, setDailySubmissions] = useState<DailySubmissionData[]>([]);
   const [easy, setEasy] = useState(0);
   const [medium, setMedium] = useState(0);
   const [hard, setHard] = useState(0);
+  const [totalSolved, setTotalSolved] = useState(0);
 
   useEffect(() => {
     const isChromeStorageAvailable =
@@ -194,13 +189,15 @@ export default function App() {
     const loadData = () => {
       if (isChromeStorageAvailable) {
         chrome.storage.local.get(
-          ["streak", "dailyData", "easy", "medium", "hard"],
+          ["streak", "dailyData", "dailySubmissions", "easy", "medium", "hard", "totalSolved"],
           (result: StorageResult) => {
             if (typeof result.streak === "number") setStreak(result.streak);
             if (Array.isArray(result.dailyData)) setDailyData(result.dailyData);
+            if (Array.isArray(result.dailySubmissions)) setDailySubmissions(result.dailySubmissions);
             if (typeof result.easy === "number") setEasy(result.easy);
             if (typeof result.medium === "number") setMedium(result.medium);
             if (typeof result.hard === "number") setHard(result.hard);
+            if (typeof result.totalSolved === "number") setTotalSolved(result.totalSolved);
           }
         );
       }
@@ -218,9 +215,13 @@ export default function App() {
           if (changes.dailyData?.newValue) {
             setDailyData(changes.dailyData.newValue as DailyData[]);
           }
+          if (changes.dailySubmissions?.newValue) {
+            setDailySubmissions(changes.dailySubmissions.newValue as DailySubmissionData[]);
+          }
           if (changes.easy?.newValue) setEasy(changes.easy.newValue as number);
           if (changes.medium?.newValue) setMedium(changes.medium.newValue as number);
           if (changes.hard?.newValue) setHard(changes.hard.newValue as number);
+          if (changes.totalSolved?.newValue) setTotalSolved(changes.totalSolved.newValue as number);
         }
       });
     }
@@ -250,7 +251,7 @@ export default function App() {
 
         {/* Routes */}
         <Routes>
-          <Route path="/" element={<Home streak={streak} dailyData={dailyData} easy={easy} medium={medium} hard={hard} />} />
+          <Route path="/" element={<Home streak={streak} dailyData={dailyData} dailySubmissions={dailySubmissions} easy={easy} medium={medium} hard={hard} totalSolved={totalSolved} />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/achievements" element={<Achievements />} />
           <Route path="/settings" element={<SettingsPage />} />
